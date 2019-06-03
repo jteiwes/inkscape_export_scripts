@@ -2,7 +2,7 @@
 """
 Export selected layers from Inkscape SVG to PNG.
 """
-
+import base64
 from xml.dom import minidom
 import codecs
 import sys
@@ -21,11 +21,12 @@ logger.addHandler(handler)
 
 
 class Exporter(object):
-    def __init__(self, source=None, output=None, dpi=90, keep_svg=False):
+    def __init__(self, source=None, output=None, dpi=90, keep_svg=False, base64=False):
         self.source = source
         self.output_dir = output
         self.dpi = dpi
         self.keep_svg = keep_svg
+        self.base64 = base64
         self.inkscape_exe = "C:/Program Files (x86)/Inkscape/inkscape.exe"
 
         if not os.path.exists(os.path.abspath(self.output_dir)):
@@ -40,6 +41,7 @@ class Exporter(object):
         svg = minidom.parse(open(self.source))
 
         g_base = None
+        g_top = None
         g_render = list()
 
         # find all layers
@@ -49,9 +51,13 @@ class Exporter(object):
             if not g.attributes["inkscape:groupmode"].value == "layer":
                 continue
             if "inkscape:label" in g.attributes.keys():
-                label = g.attributes["inkscape:label"].value
-                if "base" in str(label).lower():
+                label = str(g.attributes["inkscape:label"].value).lower()
+                if "base" in label:
+                    logger.debug("found base layer with name {}".format(label))
                     g_base = g
+                elif "top" in label:
+                    logger.debug("found top layer with name {}".format(label))
+                    g_top = g
                 else:
                     g_render.append(g)
 
@@ -73,6 +79,9 @@ class Exporter(object):
                 if "inkscape:label" in g.attributes.keys():
                     label = str(g.attributes["inkscape:label"].value).lower()
                     if g_base.attributes["inkscape:label"].value == label:
+                        # display base layer always
+                        g.attributes['style'] = "display:inline"
+                    elif g_top is not None and g_top.attributes["inkscape:label"].value == label:
                         # display base layer always
                         g.attributes['style'] = "display:inline"
                     else:
@@ -111,6 +120,22 @@ class Exporter(object):
             if not self.keep_svg:
                 os.remove(os.path.join(os.path.abspath(self.output_dir), svgfile))
 
+            if self.base64:
+                txt_file = "{}.base64".format(os.path.splitext(os.path.join(self.output_dir, pngfile))[0])
+                encoded_string = None
+
+                with open(os.path.join(self.output_dir, pngfile), "rb") as image_file:
+                    encoded_string = base64.b64encode(image_file.read())
+
+                if encoded_string is None:
+                    logger.debug("error converting file {}".format(os.path.join(self.output_dir, pngfile)))
+                    return
+
+                with open(txt_file, "w") as base64_file:
+                    base64_file.write(encoded_string.decode())
+
+                    logger.debug("successfully converted {} to {}".format(os.path.join(self.output_dir, pngfile), txt_file))
+
 
 if __name__ == "__main__":
 
@@ -118,8 +143,10 @@ if __name__ == "__main__":
     parser.add_option("-i", "--input", dest="input", help="input file to process", metavar="FILE")
     parser.add_option("-o", "--output", dest="output", help="output directory", metavar="OUTDIR")
     parser.add_option("-k", "--keepsvg", dest="keep_svg", help="keep svg file", action="store_true")
+    parser.add_option("-b", "--base64", dest="base64", help="output image as base64", action="store_true", default=False)
     parser.add_option("-d", "--dpi", dest="dpi", help="specify resolution in dpi, e.g. --dpi 90", type=int, default=90)
     parser.add_option("-v", "--verbose", dest="verbose", help="enable debug output", action="store_true", default=False)
+	
     # parser.add_option("-l", "--layers", dest="layers", help="the layers to export, e.g. --layers foo,bar,baz")
     # parser.add_option("-m", "--mode", dest="mode", help="select mode, e.g. --mode page (default)", default="page")
     # parser.add_option("-r", "--resolution", dest="resolution", help="specify resolution in px, e.g. --resolution 80x80")
@@ -136,5 +163,5 @@ if __name__ == "__main__":
         parser.print_help()
         exit()
 
-    e = Exporter(source=options.input, output=options.output, dpi=options.dpi, keep_svg=options.keep_svg)
+    e = Exporter(source=options.input, output=options.output, dpi=options.dpi, keep_svg=options.keep_svg, base64=options.base64)
     e.process()
